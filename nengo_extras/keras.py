@@ -140,7 +140,18 @@ class SequentialNetwork(nengo_extras.deepnetworks.SequentialNetwork):
             self._add_layer(layer)
 
     def _add_layer(self, layer):
-        assert layer.input_mask is None
+        ## A model with shared layers does not have a single input mask.
+        ## Probably is a better way to do this.
+        try:
+            assert layer.input_mask is None
+        except AttributeError:
+            try:
+                i = 0
+                while True:
+                    assert layer.get_input_mask_at(i) is None
+                    i += 1
+            except ValueError:
+                pass
         assert layer.input_shape[0] is None
 
         layer_adder = {
