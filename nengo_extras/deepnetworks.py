@@ -72,6 +72,13 @@ class Network(nengo.Network):
         layer = PoolLayer(input_shape, pool_size, **kwargs)
         return self.add_layer(layer, inputs=inputs, name=name)
 
+    @with_self
+    def add_node_layer(self, output, size_in, inputs=None, name=None,
+                       **kwargs):
+        kwargs.setdefault('label', name)
+        layer = NodeLayer(output, size_in = size_in)
+        return self.add_layer(layer, inputs=inputs, name=name)
+
     def compute(self, inputs, output):
         raise NotImplementedError()
 

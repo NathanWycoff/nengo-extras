@@ -7,7 +7,6 @@ import numpy as np
 
 import nengo_extras.deepnetworks
 
-
 class SoftLIF(keras.layers.Layer):
     def __init__(self, sigma=1., amplitude=1., tau_rc=0.02, tau_ref=0.002,
                  noise_model='none', tau_s=0.005, **kwargs):
@@ -126,8 +125,13 @@ def kmodel_compute_shapes(kmodel, input_shape):
 
 class SequentialNetwork(nengo_extras.deepnetworks.SequentialNetwork):
 
-    def __init__(self, model, synapse=None, lif_type='lif', **kwargs):
+    def __init__(self, model, synapse=None, lif_type='lif', pdrop_rate = None, **kwargs):
         super(SequentialNetwork, self).__init__(**kwargs)
+
+        # Initialize permadropout if applicable.
+        self.pdrop_rate = pdrop_rate
+        if (pdrop_rate is not None):
+            self.drop_mults = [] #Contains vectors of 0's and 1's to achieve dropout via elementwise multiplication
 
         assert isinstance(model, keras.models.Sequential)
         self.model = model
@@ -168,6 +172,8 @@ class SequentialNetwork(nengo_extras.deepnetworks.SequentialNetwork):
 
         for cls in type(layer).__mro__:
             if cls in layer_adder:
+                print("Now adding...")
+                print(layer)
                 return layer_adder[cls](layer)
 
         raise NotImplementedError("Cannot build layer type %r" %
@@ -263,13 +269,42 @@ class SequentialNetwork(nengo_extras.deepnetworks.SequentialNetwork):
         #     np.prod(layer.input_shape[1:]), name=layer.name)
 
     def _add_dropout_layer(self, layer):
-        return None  # keras scales by dropout rate, so we don't have to
+        if self.pdrop_rate is not None:
+            # Make a node that multiplies the output of the last layer by 0's or 1's, generated randomly.
+            last_layer = self.layers[-1]
+            out_size = last_layer.size_out
+
+            self.drop_mults.append(np.random.binomial(1,1.0-self.pdrop_rate,size=out_size))
+
+            # keras scales by the dropout rate, so we need to undo that.
+            #dropnode = nengo.Node(output=lambda t, x: self.drop_mults[-1] * x / self.pdrop_rate , \
+            #        size_in = out_size, size_out = out_size)
+            #nl = NodeLayer(lambda t, x: self.drop_mults[-1] * x / self.pdrop_rate, size_in = out_size)
+
+            #TODO: Make sure scaling is correct (mult by drop_rate)
+            dropnode = self.add_node_layer(lambda t, x: self.drop_mults[-1] * x / (1.0-self.pdrop_rate), out_size)
+            #dropnode = self.add_node_layer(lambda t, x: self.drop_mults[-1] * x, out_size)
+
+            return dropnode
+        else:
+            return None  # keras scales by dropout rate, so we don't have to
 
     def _add_flatten_layer(self, layer):
         return None  # no computation, just reshaping, so ignore
 
     def _add_gaussian_noise_layer(self, layer):
         return None  # no noise during testing
+
+    def update_dropout(self):
+        """
+        Resample which nodes are in dropout, maintaining the same dropout probability.
+        """
+        if self.pdrop_rate is not None:
+            for i in range(len(self.drop_mults)):
+                self.drop_mults[i] = np.random.binomial(1,1.0-self.pdrop_rate,size=len(self.drop_mults[i]))
+        else:
+            raise AttributeError("update_dropout called but this network was not initialized with permadropout.")
+
 
 
 def LSUVinit(kmodel, X, tol=0.1, t_max=50):
